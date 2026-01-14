@@ -1,7 +1,53 @@
 import { NextRequest } from "next/server";
 
-const PROXY_TARGET_URL =
-  process.env.PROXY_TARGET_URL;
+const PROXY_TARGET_URL = process.env.PROXY_TARGET_URL;
+
+// Validate environment variable at startup
+if (!PROXY_TARGET_URL) {
+  throw new Error("PROXY_TARGET_URL environment variable is required");
+}
+
+let parsedTargetUrl: URL;
+try {
+  parsedTargetUrl = new URL(PROXY_TARGET_URL);
+} catch {
+  throw new Error("PROXY_TARGET_URL must be a valid URL");
+}
+
+if (!["http:", "https:"].includes(parsedTargetUrl.protocol)) {
+  throw new Error("PROXY_TARGET_URL must use http or https protocol");
+}
+
+/**
+ * Validates and sanitizes path segments to prevent path traversal attacks.
+ * Returns null if the path contains malicious segments.
+ */
+function sanitizePath(segments: string[]): string | null {
+  for (const segment of segments) {
+    // Block path traversal attempts
+    if (segment === ".." || segment === ".") {
+      return null;
+    }
+
+    // Block null bytes
+    if (segment.includes("\0")) {
+      return null;
+    }
+
+    // Decode and check for encoded traversal attempts
+    try {
+      const decoded = decodeURIComponent(segment);
+      if (decoded.includes("..") || decoded.includes("\0")) {
+        return null;
+      }
+    } catch {
+      // Invalid encoding - reject
+      return null;
+    }
+  }
+
+  return segments.length > 0 ? `/${segments.join("/")}` : "";
+}
 
 // Headers that should not be forwarded
 const HOP_BY_HOP_HEADERS = new Set([
@@ -33,12 +79,23 @@ async function proxyRequest(
 ): Promise<Response> {
   const resolvedParams = await params;
   const pathSegments = resolvedParams.path || [];
-  const path = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "";
 
-  const url = new URL(request.url);
-  const queryString = url.search;
+  // Validate and sanitize path to prevent SSRF/path traversal
+  const sanitizedPath = sanitizePath(pathSegments);
+  if (sanitizedPath === null) {
+    return new Response("Bad Request", { status: 400 });
+  }
 
-  const targetUrl = `${PROXY_TARGET_URL}${path}${queryString}`;
+  // Construct target URL safely using URL API
+  const targetUrlObj = new URL(PROXY_TARGET_URL!);
+  targetUrlObj.pathname =
+    targetUrlObj.pathname.replace(/\/$/, "") + sanitizedPath;
+
+  // Safely copy query parameters from the request
+  const requestUrl = new URL(request.url);
+  targetUrlObj.search = requestUrl.search;
+
+  const targetUrl = targetUrlObj.toString();
 
   // Forward headers, excluding hop-by-hop headers
   const headers = new Headers();
@@ -49,7 +106,6 @@ async function proxyRequest(
   }
 
   // Set the host header to the target host
-  const targetUrlObj = new URL(targetUrl);
   headers.set("host", targetUrlObj.host);
 
   // Forward the request
