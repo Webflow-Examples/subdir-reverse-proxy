@@ -13,7 +13,7 @@ This proxy is useful when you want to serve content from an external URL under a
 - Handles hop-by-hop headers correctly
 - Preserves query strings
 - Handles redirects manually to maintain proxy integrity
-- Deployable to Cloudflare Workers for edge performance
+- Deployable to Webflow Cloud for edge performance
 
 ## Getting Started
 
@@ -66,7 +66,7 @@ npm start
 
 ### Webflow Cloud Deployment
 
-This project is configured to deploy to Webflwo Cloud using [OpenNext](https://opennext.js.org/).
+This project is configured to deploy to Webflow Cloud using [OpenNext](https://opennext.js.org/).
 
 Preview locally:
 
